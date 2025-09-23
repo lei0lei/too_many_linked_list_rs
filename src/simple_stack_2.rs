@@ -96,6 +96,12 @@ impl<'a, T> Iter<'a, T> {
             next: list.head.as_deref(), // as_deref() 将 Option<Box<Node<T>>> 转换为 Option<&Node<T>>
         }
     }
+    fn next(&mut self) -> Option<&'a T> {
+        self.next.map(|node| {
+            self.next = node.next.as_deref(); // 更新next为下一个节点
+            &node.elem
+        })
+    }
 }
 
 
@@ -108,6 +114,16 @@ impl<'a, T> IterMut<'a, T> {
     fn new(list: &'a mut List<T>) -> Self {
         IterMut {
             next: list.head.as_deref_mut(), // as_deref_mut() 将 Option<Box<Node<T>>> 转换为 Option<&mut Node<T>>
+        }
+    }
+    fn next(&mut self) -> Option<&'a mut T> {
+        // 这里不能用map，因为闭包会多次借用self.next，违反借用规则
+        match self.next.take() {
+            Some(node) => {
+                self.next = node.next.as_deref_mut(); // 更新next为下一个节点
+                Some(&mut node.elem)
+            }
+            None => None,
         }
     }
 }
@@ -211,4 +227,62 @@ mod tests {
         assert_eq!(list.pop(), None);
     }
 
+
+    #[test]
+    fn into_iter() {
+        let mut list = List::new();
+        list.push(1);
+        list.push(2);
+        list.push(3);
+
+        let mut iter = IntoIter(list);
+
+        assert_eq!(iter.next(), Some(3));
+        assert_eq!(iter.next(), Some(2));
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn iter() {
+        let mut list = List::new();
+        list.push(1);
+        list.push(2);
+        list.push(3);
+
+        let mut iter = Iter::new(&list);
+
+        assert_eq!(iter.next(), Some(&3));
+        assert_eq!(iter.next(), Some(&2));
+        assert_eq!(iter.next(), Some(&1));
+        assert_eq!(iter.next(), None);
+
+        // 确保链表未被消耗
+        assert_eq!(list.pop(), Some(3));
+    }
+
+    #[test]
+    fn iter_mut() {
+        let mut list = List::new();
+        list.push(1);
+        list.push(2);
+        list.push(3);
+
+        {
+            let mut iter_mut = IterMut::new(&mut list);
+
+            if let Some(value) = iter_mut.next() {
+                *value += 10; // 修改第一个元素
+            }
+            if let Some(value) = iter_mut.next() {
+                *value += 20; // 修改第二个元素
+            }
+        }
+
+        let mut iter = Iter::new(&list);
+        assert_eq!(iter.next(), Some(&13)); // 3 + 10
+        assert_eq!(iter.next(), Some(&22)); // 2 + 20
+        assert_eq!(iter.next(), Some(&1));  // 未修改
+        assert_eq!(iter.next(), None);
+    }
 }
