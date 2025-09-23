@@ -24,11 +24,13 @@ impl List{
             elem,
             next: self.head.take(),
             // take() 方法会将 Option 的值取出，并将原来的 Option 置为 None
+            // next: mem::replace(&mut self.head, None), // 另一种实现方式
         });
         self.head = Some(new_node);
     }
 
     pub fn pop(&mut self) -> Option<i32> {
+        // 取出节点元素，把self.head 置为下一个节点
         self.head.take().map(|node| {
             self.head = node.next;
             node.elem
@@ -42,13 +44,17 @@ impl Drop for List {
         while let Some(mut boxed_node) = cur_link {
             cur_link = boxed_node.next.take();
         }
+
+        // 可以直接采用pop函数
+        // while self.pop().is_some() {}
     }
 }
 
+// 测试代码
 #[cfg(test)]
 mod tests {
   use super::List;
-
+    // 基本功能测试
     #[test]
     fn basics() {
         let mut list = List::new();
