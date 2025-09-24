@@ -63,6 +63,22 @@ impl<T> List<T> {
         })
     }
 
+    pub fn into_iter(self) -> IntoIter<T> {
+        IntoIter(self)
+    }
+
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter {
+            next: self.head.as_deref(), // as_deref() 将 Option<Box<Node<T>>> 转换为 Option<&Node<T>>
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        IterMut {
+            next: self.head.as_deref_mut(), // as_deref_mut() 将 Option<Box<Node<T>>> 转换为 Option<&mut Node<T>>
+        }
+    }
+
 }
 
 impl<T> Drop for List<T> {
@@ -76,7 +92,7 @@ impl<T> Drop for List<T> {
 
 pub struct IntoIter<T>(List<T>);
 // 实现值迭代器，消耗整个链表每次迭代返回一个元素的所有权
-// for x in list.into_iter()
+// for x in list.into_iter() for会自动匹配Some(x) => Some(x), None => None
 impl<T> Iterator for IntoIter<T> {
     type Item = T;
 
@@ -88,16 +104,21 @@ impl<T> Iterator for IntoIter<T> {
 // 只读借用迭代器，每次返回链表元素的不可变借用而不消耗链表本身
 // for x in list.iter()
 pub struct Iter<'a, T> {
+    // T是个泛型，有可能是引用类型，所以必须要生命周期标注
     next: Option<&'a Node<T>>,
 }
-impl<'a, T> Iter<'a, T> {
-    fn new(list: &'a List<T>) -> Self {
-        Iter {
-            next: list.head.as_deref(), // as_deref() 将 Option<Box<Node<T>>> 转换为 Option<&Node<T>>
-        }
-    }
-    fn next(&mut self) -> Option<&'a T> {
-        self.next.map(|node| {
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // match self.next.take() {
+        //     Some(node) => {
+        //         self.next = node.next.as_deref(); // 更新next为下一个节点
+        //         Some(&node.elem)
+        //     }
+        //     None => None,
+        // }
+        self.next.map(|node|{
             self.next = node.next.as_deref(); // 更新next为下一个节点
             &node.elem
         })
@@ -110,23 +131,18 @@ impl<'a, T> Iter<'a, T> {
 pub struct IterMut<'a, T> {
     next: Option<&'a mut Node<T>>,
 }
-impl<'a, T> IterMut<'a, T> {
-    fn new(list: &'a mut List<T>) -> Self {
-        IterMut {
-            next: list.head.as_deref_mut(), // as_deref_mut() 将 Option<Box<Node<T>>> 转换为 Option<&mut Node<T>>
-        }
-    }
-    fn next(&mut self) -> Option<&'a mut T> {
-        // 这里不能用map，因为闭包会多次借用self.next，违反借用规则
-        match self.next.take() {
-            Some(node) => {
-                self.next = node.next.as_deref_mut(); // 更新next为下一个节点
-                Some(&mut node.elem)
-            }
-            None => None,
-        }
+
+impl<'a, T> Iterator for IterMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next.take().map(|node|{
+            self.next = node.next.as_deref_mut(); // 更新next为下一个节点
+            &mut node.elem
+        })
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -241,6 +257,9 @@ mod tests {
         assert_eq!(iter.next(), Some(2));
         assert_eq!(iter.next(), Some(1));
         assert_eq!(iter.next(), None);
+        // for x in list.into_iter() {
+        //     println!("{}", x);
+        // }
     }
 
     #[test]
@@ -250,15 +269,11 @@ mod tests {
         list.push(2);
         list.push(3);
 
-        let mut iter = Iter::new(&list);
+        let iter = list.iter();
 
-        assert_eq!(iter.next(), Some(&3));
-        assert_eq!(iter.next(), Some(&2));
-        assert_eq!(iter.next(), Some(&1));
-        assert_eq!(iter.next(), None);
-
-        // 确保链表未被消耗
-        assert_eq!(list.pop(), Some(3));
+        for x in iter {
+            println!("{}", x);
+        }   
     }
 
     #[test]
@@ -268,21 +283,37 @@ mod tests {
         list.push(2);
         list.push(3);
 
-        {
-            let mut iter_mut = IterMut::new(&mut list);
+        let mut iter = list.iter_mut();
 
-            if let Some(value) = iter_mut.next() {
-                *value += 10; // 修改第一个元素
-            }
-            if let Some(value) = iter_mut.next() {
-                *value += 20; // 修改第二个元素
-            }
+        while let Some(x) = iter.next() {
+            *x *= 10; // 将每个元素乘以10
         }
 
-        let mut iter = Iter::new(&list);
-        assert_eq!(iter.next(), Some(&13)); // 3 + 10
-        assert_eq!(iter.next(), Some(&22)); // 2 + 20
-        assert_eq!(iter.next(), Some(&1));  // 未修改
-        assert_eq!(iter.next(), None);
+        let mut iter2 = list.iter();
+        assert_eq!(iter2.next(), Some(&30));
+        assert_eq!(iter2.next(), Some(&20));
+        assert_eq!(iter2.next(), Some(&10));
+        assert_eq!(iter2.next(), None);
     }
+
+    #[test]
+    fn multiple_mut_refs() {
+        let mut list = List::new();
+        list.push(1);
+        list.push(2);
+        list.push(3);
+
+        let mut iter = list.iter_mut();
+        
+        // 尝试同时获取多个可变引用
+        let ref1 = iter.next().unwrap(); // 第一个可变引用
+        let ref2 = iter.next().unwrap(); // 第二个可变引用
+        
+        // 尝试同时使用它们
+        *ref1 = 100;
+        *ref2 = 200;
+        
+        println!("ref1: {}, ref2: {}", ref1, ref2);
+    }
+
 }
